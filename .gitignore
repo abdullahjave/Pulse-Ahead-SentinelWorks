@@ -1,0 +1,12 @@
+node_modules/
+__pycache__/
+.pytest_cache/
+backend/data/state.db
+
+*.log
+*.tsbuildinfo
+.env
+.env.*
+*.sqlite*
+backend/data/*.db*
+submission/

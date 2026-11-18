@@ -1,0 +1,55 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  --color-navy-950: #071624;
+  --color-navy-900: #0b1f33;
+  --color-navy-800: #122b45;
+  --color-navy-700: #1c3a5a;
+  --color-navy-600: #2a4d72;
+  --color-canvas: #f4f6f9;
+  --color-line: #e2e7ee;
+  --color-ink: #0f1c2b;
+  --color-muted: #5b6b7d;
+  --color-teal-brand: #0e7c74;
+  --color-action: #b42318;
+  --color-action-bg: #fde8e6;
+  --color-watch: #a15c07;
+  --color-watch-bg: #fef1d6;
+  --color-normal: #0f6e52;
+  --color-normal-bg: #dff3eb;
+  --color-nodata: #475467;
+  --color-nodata-bg: #eaedf1;
+}
+
+html, body, #root { height: 100%; }
+body {
+  @apply bg-canvas text-ink font-sans antialiased;
+  font-feature-settings: "cv11", "ss01", "tnum";
+}
+
+:focus-visible {
+  outline: 2px solid #14b8a6;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.hatch {
+  background-image: repeating-linear-gradient(135deg, rgba(71, 84, 103, 0.14) 0 6px, transparent 6px 12px);
+}
+
+.fade-in { animation: fadeIn 180ms ease-out; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+.scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: #cfd6df; border-radius: 8px; }
+
+input[type="range"].replay { accent-color: #0e7c74; }
+
+.recharts-cartesian-axis-tick-value { font-size: 11px; fill: #5b6b7d; }
+.recharts-tooltip-wrapper { outline: none; }
