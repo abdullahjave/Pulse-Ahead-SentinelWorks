@@ -1,0 +1,8 @@
+{
+  "functions": {
+    "app.py": {
+      "maxDuration": 60,
+      "excludeFiles": "{frontend/**,public/**,docs/**,submission/**,backend/tests/**,node_modules/**}"
+    }
+  }
+}

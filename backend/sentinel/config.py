@@ -11,7 +11,10 @@ from datetime import date, timedelta
 from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:  # read-only deployment filesystem; the packaged data files are still readable
+    pass
 
 START_DATE = date(2026, 6, 1)  # Monday
 N_DAYS = 90

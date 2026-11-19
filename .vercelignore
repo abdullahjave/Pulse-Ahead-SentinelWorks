@@ -1,0 +1,7 @@
+node_modules
+frontend/node_modules
+submission
+*.docx
+*.log
+backend/data/state.db
+backend/tests

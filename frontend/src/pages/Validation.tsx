@@ -72,9 +72,13 @@ export default function Validation() {
         </div>
         <div className="flex items-center gap-3">
           {msg && <span role="status" className="text-xs text-muted">{msg}</span>}
-          <button onClick={rerun} disabled={busy} className="inline-flex items-center gap-2 rounded-md border border-line bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 disabled:opacity-50">
+{data.rerun?.available === false ? (
+            <span role="note" className="max-w-sm rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-900"><span className="font-semibold">Precomputed report.</span> Re-run is disabled on this hosted demo. {data.rerun.reason}</span>
+          ) : (
+                    <button onClick={rerun} disabled={busy} className="inline-flex items-center gap-2 rounded-md border border-line bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 disabled:opacity-50">
             <RefreshCw className={cx("h-4 w-4", busy && "animate-spin")} />{busy ? `Re-running back-test (last run took ${Math.round(data.runtime_seconds)} s)…` : "Re-run back-test"}
           </button>
+          )}
         </div>
       </div>
 

@@ -170,6 +170,17 @@ With the thresholds held fixed, Action sensitivity falls below the 85% design ta
 Watch-level detection stays at 100% (Watch fires on exposure above published guidance alone). The comparator also degrades. The median lead is 3 days in
 every row, which shows it is largely a property of the comparator's definition and the scenarios, not a general result.
 
+## Deploying to Vercel (Hobby)
+
+One Vercel project, imported from the repository root. `app.py` (root) exposes the FastAPI app; the compiled frontend is served from `public/`; `backend/data/` (tuned settings and the precomputed validation report) ships inside the function.
+
+- Framework Preset: **FastAPI** (auto-detected from root `requirements.txt`; Python 3.12 via `.python-version`). Root Directory: repository root. Build Command, Output Directory, Install Command: leave empty/default.
+- Environment variable (required): `SENTINEL_SESSION_SECRET`, a random string of 16+ characters (e.g. `openssl rand -hex 32`). Sessions are HMAC-signed and stateless, so every function instance accepts them. Without it, hosted sign-in returns 503 (fail closed).
+- Optional: `SENTINEL_READ_ONLY`, `SENTINEL_VALIDATION_RERUN`, `SENTINEL_DB_PATH` (see below).
+- After changing the frontend, run `cd frontend && npm run build && npm run build:public` and commit `frontend/dist` and `public/`.
+
+Hosted behaviour: the filesystem is read-only and not shared, so **recording responses is disabled** (a labelled read-only demo mode; incident detail still opens) and the **validation re-run is disabled** (the precomputed report is served). Locally both work as before (`./run.sh`, SQLite at `backend/data/state.db`).
+
 ## Five-minute demo walkthrough
 
 1. **Overview, Heatwave scenario.** Use **Jump to event** to open 26 Jul (heatwave begins). Step forward. On **27 Jul**, N2 goes to

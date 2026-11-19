@@ -3,11 +3,17 @@
 The role switcher in the UI signs in as one of three demo users and receives a server-issued
 bearer token. Every API call derives the role from that token on the server; the client never
 sends its role, so changing the UI cannot widen access. This is a prototype: there are no
-passwords and tokens live in memory.
+passwords and tokens are HMAC-signed and stateless so they work across serverless instances.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
+import os
 import secrets
+import time
 
 from fastapi import Depends, Header, HTTPException
 
@@ -53,21 +59,75 @@ PERMISSIONS = {
     },
 }
 
-_TOKENS: dict[str, str] = {}
+SESSION_TTL_SECONDS = 12 * 3600
+_EPHEMERAL_SECRET = secrets.token_bytes(32)
+
+
+def hosted() -> bool:
+    """True on Vercel (or when SENTINEL_HOSTED=1): several stateless function instances serve requests."""
+    return bool(os.environ.get("VERCEL")) or os.environ.get("SENTINEL_HOSTED") == "1"
+
+
+def _secret() -> bytes:
+    """Signing key for session tokens. Tokens are stateless (HMAC-signed), so any function instance can verify
+    them. Hosted deployments MUST set SENTINEL_SESSION_SECRET; there is deliberately no built-in fallback there,
+    because a key known to the source code would let anyone mint a token for any role. Locally an ephemeral
+    per-process key is used when the variable is unset."""
+    env = os.environ.get("SENTINEL_SESSION_SECRET", "").strip()
+    if len(env) >= 16:
+        return env.encode()
+    if hosted():
+        raise HTTPException(503, "Demo sign-in is not configured: set the SENTINEL_SESSION_SECRET environment variable (at least 16 characters).")
+    return _EPHEMERAL_SECRET
+
+
+def session_configured() -> bool:
+    try:
+        _secret()
+        return True
+    except HTTPException:
+        return False
+
+
+def _b64(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+
+def _unb64(s: str) -> bytes:
+    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+
+def _sign(body: str) -> str:
+    return _b64(hmac.new(_secret(), body.encode(), hashlib.sha256).digest())
 
 
 def issue_token(user_id: str) -> str:
     if user_id not in USERS:
         raise HTTPException(404, "Unknown demo user")
-    token = secrets.token_urlsafe(24)
-    _TOKENS[token] = user_id
-    return token
+    body = _b64(json.dumps({"u": user_id, "exp": int(time.time()) + SESSION_TTL_SECONDS}, separators=(",", ":")).encode())
+    return f"{body}.{_sign(body)}"
+
+
+def _verify(token: str) -> str | None:
+    """Return the user id for a valid, unexpired token, else None. The role is always looked up server-side."""
+    try:
+        body, sig = token.split(".", 1)
+        if not hmac.compare_digest(sig, _sign(body)):
+            return None
+        claims = json.loads(_unb64(body))
+        if int(claims["exp"]) < time.time():
+            return None
+        return claims["u"] if claims["u"] in USERS else None
+    except HTTPException:
+        raise
+    except Exception:
+        return None
 
 
 def current_user(authorization: str | None = Header(default=None)) -> dict:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(401, "Sign in required")
-    user_id = _TOKENS.get(authorization.split(" ", 1)[1].strip())
+    user_id = _verify(authorization.split(" ", 1)[1].strip())
     if not user_id:
         raise HTTPException(401, "Session expired; sign in again")
     user = USERS[user_id]

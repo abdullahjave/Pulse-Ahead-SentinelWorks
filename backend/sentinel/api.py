@@ -6,6 +6,7 @@ import csv
 import io
 import json
 import math
+import os
 import threading
 from functools import lru_cache
 from pathlib import Path
@@ -18,7 +19,7 @@ from pydantic import BaseModel
 
 from . import config as C
 from . import release, store
-from .auth import USERS, PERMISSIONS, CurrentUser, issue_token, require_site, require_zone, sites_in_scope, zones_in_scope
+from .auth import session_configured, hosted, USERS, PERMISSIONS, CurrentUser, issue_token, require_site, require_zone, sites_in_scope, zones_in_scope
 from .detection import baseline_at
 from .engine import TIER_RANK, demo_run, evaluate, zone_status
 from .pipeline import GEO_LEVELS, location_quality, zone_series
@@ -42,6 +43,24 @@ def num(x, nd=2):
     if math.isnan(xf) or math.isinf(xf):
         return None
     return round(xf, nd)
+
+
+def validation_rerun_enabled() -> bool:
+    """The back-test takes minutes of CPU, so hosted demos serve the precomputed report instead."""
+    flag = os.environ.get("SENTINEL_VALIDATION_RERUN", "").strip().lower()
+    if flag in ("1", "true", "yes"):
+        return True
+    if flag in ("0", "false", "no"):
+        return False
+    return not hosted()
+
+
+def capabilities() -> dict:
+    rec, rerun = store.recording_enabled(), validation_rerun_enabled()
+    return {"hosted_demo": hosted(), "recording": rec, "validation_rerun": rerun,
+            "recording_unavailable_reason": None if rec else store.READ_ONLY_REASON,
+            "validation_rerun_unavailable_reason": None if rerun else
+            "Disabled on the hosted demo: the back-test needs several minutes of CPU, longer than serverless limits allow. The precomputed report below was generated with the same code and the tuned settings shown."}
 
 
 def get_run(scenario: str, degraded: bool):
@@ -276,7 +295,8 @@ def health():
     except RuntimeError as exc:
         config_error = str(exc)
     return {"ok": config_error is None, "config_error": config_error,
-            "validation_available": (C.DATA_DIR / "validation_results.json").exists()}
+            "validation_available": (C.DATA_DIR / "validation_results.json").exists(), "capabilities": capabilities(),
+            "session_configured": session_configured()}
 
 
 @app.get("/api/meta")
@@ -284,6 +304,7 @@ def meta(user=CurrentUser):
     scope = zones_in_scope(user)
     return {
         "data_mode": {"synthetic": True, "replay": True, "label": "Synthetic data · Replay mode"},
+        "capabilities": capabilities(),
         "dates": {"start": iso(0), "end": iso(C.N_DAYS - 1), "detection_start": iso(C.WARMUP_DAYS)},
         "scenarios": [{"id": s.id, "label": s.label, "description": s.description, "default_as_of": iso(s.default_as_of), "key_dates": scenario_key_dates(s)} for s in SCENARIOS.values()],
         "districts": C.DISTRICTS,
@@ -556,6 +577,8 @@ def incident_detail(inc_id: str, scenario: str = "heatwave", degraded: bool = Fa
                       "weight_available": num(h["weight_available"])} for h in rows],
         "evidence": ev, "playbook": pb,
         "decisions": store.decisions(run.key, inc.id),
+        "recording_enabled": store.recording_enabled(),
+        "recording_unavailable_reason": None if store.recording_enabled() else store.READ_ONLY_REASON,
         "allowed_decisions": user["permissions"]["decision_statuses"],
         "related": related,
         "explanation_note": "Contribution shares show how the published scoring rule combined each signal. They are not causal attributions or calibrated probabilities.",
@@ -577,7 +600,10 @@ def record_decision(inc_id: str, body: DecisionBody, user=CurrentUser):
     inc = _find_incident(run, inc_id, t, user)
     if body.status not in user["permissions"]["decision_statuses"]:
         raise HTTPException(403, "Your role cannot record this decision")
-    rec = store.add_decision(run.key, inc.id, body.status, body.note, user["role"], user["id"], iso(t))
+    try:
+        rec = store.add_decision(run.key, inc.id, body.status, body.note, user["role"], user["id"], iso(t))
+    except store.ReadOnlyMode as exc:
+        raise HTTPException(503, str(exc))
     return {"recorded": rec, "notification_sent": False}
 
 
@@ -585,7 +611,10 @@ def record_decision(inc_id: str, body: DecisionBody, user=CurrentUser):
 def reset_demo(user=CurrentUser):
     if user["role"] != "public_health_officer":
         raise HTTPException(403, "Only the Public Health Officer demo role can reset demo decisions")
-    return {"decisions_removed": store.reset()}
+    try:
+        return {"decisions_removed": store.reset()}
+    except store.ReadOnlyMode as exc:
+        raise HTTPException(503, str(exc))
 
 
 # ---------------------------------------------------------------- workplaces (weekly release policy, see release.py)
@@ -772,13 +801,16 @@ def validation(user=CurrentUser):
     data = json.loads(path.read_text())
     if data.get("params") != C.detection_params():
         raise HTTPException(503, "Validation settings have changed. Re-run the back-test.")
-    return data
+    cap = capabilities()
+    return {**data, "rerun": {"available": cap["validation_rerun"], "reason": cap["validation_rerun_unavailable_reason"], "precomputed": True}}
 
 
 @app.post("/api/validation/rerun")
 def validation_rerun(user=CurrentUser):
     if user["role"] != "public_health_officer":
         raise HTTPException(403, "Only the Public Health Officer demo role can re-run the back-test")
+    if not validation_rerun_enabled():
+        raise HTTPException(503, capabilities()["validation_rerun_unavailable_reason"])
     if not _validation_lock.acquire(blocking=False):
         raise HTTPException(409, "A validation run is already in progress")
     try:
@@ -870,7 +902,7 @@ def impact(scenario: str = "heatwave", user=CurrentUser):
 
 
 # ---------------------------------------------------------------- static frontend
-if FRONTEND_DIST.exists():
+if FRONTEND_DIST.exists() and not os.environ.get("VERCEL"):
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
 
     @app.get("/{path:path}", include_in_schema=False)

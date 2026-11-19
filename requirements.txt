@@ -1,0 +1,4 @@
+# Runtime dependencies for the Vercel deployment (the FastAPI function). Local development uses backend/requirements.txt.
+fastapi>=0.110
+numpy>=1.26
+pydantic>=2.5
